@@ -1,7 +1,7 @@
 const fetch = require("node-fetch");
 
 
-const TOKEN = "вставь токен";
+const TOKEN = "твой токен";
 
 async function getBotInfo() {
     try {
