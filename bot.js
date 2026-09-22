@@ -1,7 +1,8 @@
-﻿process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 const fetch = require("node-fetch");
 const path = require("path");
 const Database = require("better-sqlite3");
+const Fuse = require("fuse.js");
 
 // Наст
 const TOKEN = "твой токен";
@@ -151,6 +152,115 @@ function get2GisUrl(address) {
     return `https://2gis.ru/kurgan/search/${encodeURIComponent(address)}`;
 }
 
+// ================= Нечёткий поиск (fuse.js) =================
+const AUTO_THRESHOLD = 0.35;    // при таком качестве совпадения улицы — сразу показываем карточку
+const SUGGEST_THRESHOLD = 0.6;  // при таком качестве — предлагаем список похожих адресов
+const MIN_MATCH = 3;            // минимальная длина совпадающего фрагмента запроса
+
+function normalizeFuzzy(s) {
+    return String(s).toLowerCase().replace(/ё/g, 'е');
+}
+
+function capName(s) {
+    if (!s) return s;
+    return String(s).split(/\s+/).filter(Boolean).map(w => w[0].toUpperCase() + w.slice(1)).join(' ');
+}
+
+function formatAddress(street, street_type, house) {
+    return `г. Курган, ${street_type} ${capName(street)}, д. ${house}`;
+}
+
+let streetFuse = null;
+const housesByStreet = new Map();
+
+function buildFuzzyIndex() {
+    const streets = db.prepare("SELECT DISTINCT street_type, street FROM houses ORDER BY street").all();
+    streetFuse = new Fuse(
+        streets.map(s => ({ street: s.street, street_type: s.street_type, norm: normalizeFuzzy(s.street) })),
+        {
+            keys: ["norm"],
+            threshold: 1,              // фильтруем сами по score (чем меньше — тем точнее)
+            ignoreLocation: true,
+            minMatchCharLength: MIN_MATCH,
+            includeScore: true,
+            ignoreFieldNorm: true
+        }
+    );
+    for (const r of db.prepare("SELECT street, house FROM houses").all()) {
+        if (!housesByStreet.has(r.street)) housesByStreet.set(r.street, []);
+        housesByStreet.get(r.street).push(r.house);
+    }
+    console.log(`🔎 Нечёткий поиск: ${streets.length} улиц, справочник домов готов`);
+}
+
+// Похожие улицы (от лучшего к худшему), отфильтрованные по порогу score
+function searchStreets(street, limit, threshold) {
+    const q = normalizeFuzzy(street);
+    if (!q) return [];
+    return streetFuse.search(q, { limit: Math.max(limit, 8) })
+        .filter(r => r.score !== undefined && r.score <= threshold)
+        .map(r => ({ street: r.item.street, street_type: r.item.street_type, score: r.score }));
+}
+
+function houseNumber(h) {
+    const m = String(h).match(/^\d+/);
+    return m ? parseInt(m[0], 10) : null;
+}
+
+function closestHouse(list, target) {
+    if (!list || !list.length) return null;
+    const t = houseNumber(target);
+    if (t === null) return [...list].sort((a, b) => a.localeCompare(b, "ru"))[0];
+    let best = list[0], bestDist = Infinity;
+    for (const h of list) {
+        const n = houseNumber(h);
+        const d = n === null ? Infinity : Math.abs(n - t);
+        if (d < bestDist) { bestDist = d; best = h; }
+    }
+    return best;
+}
+
+// Опечатка в улице + точный номер дома → дом на этом же месте находится сразу
+function findHouseViaFuzzy(street, house) {
+    for (const cand of searchStreets(street, 3, AUTO_THRESHOLD)) {
+        const data = findHouseInDb(cand.street, house);
+        if (data) return { data, matchedStreet: cand.street };
+    }
+    return null;
+}
+
+// Список похожих существующих адресов (улица + ближайший реальный дом)
+function suggestAddresses(street, house) {
+    const out = [];
+    for (const cand of searchStreets(street, 3, SUGGEST_THRESHOLD)) {
+        const h = closestHouse(housesByStreet.get(cand.street) || [], house);
+        if (h) out.push({ street: cand.street, street_type: cand.street_type, house: h });
+    }
+    return out;
+}
+
+// Оркестратор поиска: точный → нечёткий → подсказки
+function searchHouse(street, house) {
+    const exact = findHouseInDb(street, house);
+    if (exact) return { kind: "exact", data: exact };
+
+    if (house) {
+        const viaFuzzy = findHouseViaFuzzy(street, house);
+        if (viaFuzzy) return { kind: "fuzzy", data: viaFuzzy.data, matchedStreet: viaFuzzy.matchedStreet };
+
+        const suggestions = suggestAddresses(street, house);
+        if (suggestions.length) return { kind: "suggest", suggestions };
+        return { kind: "notfound" };
+    }
+
+    // улица без номера дома
+    const streets = searchStreets(street, 5, SUGGEST_THRESHOLD);
+    if (streets.length) return { kind: "street-suggest", streets };
+    return { kind: "garbage" };
+}
+
+buildFuzzyIndex();
+
 async function handleMessage(update) {
     if (update.update_type !== "message_created") return;
 
@@ -185,7 +295,9 @@ async function handleMessage(update) {
             `<b>📋 Справка по командам:</b>\n\n` +
             `• <b>/start</b> — активировать режим поиска\n` +
             `• <b>/help</b> — показать эту подсказку\n\n` +
-            `После активации вы можете вводить адреса один за другим без повторной команды /start.`
+            `После активации вы можете вводить адреса один за другим без повторной команды /start.\n\n` +
+            `🔎 <b>Поиск терпим к опечаткам:</b>\n` +
+            `Если дом не найден точно, бот предложит похожие адреса (например: <i>«Корева 117»</i> → <i>«Кирова 117»</i>).`
         );
         return;
     }
@@ -203,7 +315,7 @@ async function handleMessage(update) {
     const { street, house } = parseAddress(text);
     console.log(`🔍 Парсинг: улица="${street}", дом="${house}"`);
 
-    if (!street || !house) {
+    if (!street) {
         await sendText(userId,
             `❌ <b>Не удалось распознать адрес</b>\n\n` +
             `Ваш запрос: <i>${text}</i>\n\n` +
@@ -215,37 +327,70 @@ async function handleMessage(update) {
     }
 
     await sendText(userId, "⏳ Ищу информацию...");
-    const data = findHouseInDb(street, house);
+    const result = searchHouse(street, house);
 
-    if (!data) {
+    // Не найдено, но есть списки похожих адресов
+    if (result.kind === "suggest") {
+        let msg = `❌ <b>Дом не найден</b>\n\n` +
+            `Ваш запрос: <i>${text}</i>\n\n` +
+            `🔍 <b>Возможно, вы имели в виду:</b>\n`;
+        for (const s of result.suggestions) {
+            msg += `• <b>${formatAddress(s.street, s.street_type, s.house)}</b>\n`;
+        }
+        const first = result.suggestions[0];
+        msg += `\n💡 Введите полный адрес из списка, например: <i>${formatAddress(first.street, first.street_type, first.house)}</i>`;
+        await sendText(userId, msg);
+        return;
+    }
+
+    // Улица без номера дома — есть похожие улицы
+    if (result.kind === "street-suggest") {
+        let msg = `❌ <b>Не удалось распознать номер дома</b>\n\n` +
+            `Вы ввели: <i>${text}</i>\n\n` +
+            `🔍 <b>Похожие улицы:</b>\n`;
+        for (const s of result.streets) {
+            msg += `• <b>${s.street_type} ${capName(s.street)}</b>\n`;
+        }
+        const first = result.streets[0];
+        msg += `\n💡 Введите улицу и номер дома, например: <i>${capName(first.street)} 1</i>`;
+        await sendText(userId, msg);
+        return;
+    }
+
+    // Совсем ничего похожего
+    if (result.kind === "garbage" || result.kind === "notfound") {
         await sendText(userId,
             `❌ <b>Дом не найден</b>\n\n` +
             `Ваш запрос: <i>${text}</i>\n\n` +
             `💡 Попробуйте написать проще, например: <i>Кирова 117</i>`
         );
-    } else {
-        const mapUrl = get2GisUrl(data.address);
-        const ukWebsite = getUkWebsite(data.uk);
-
-        let reply = `🏠 <b>Справка о доме</b>\n\n`;
-        reply += `📍 <b>Адрес:</b> <a href="${mapUrl}">${data.address}</a>\n`;
-        if (data.uk && data.uk !== 'Не указана') {
-            reply += ukWebsite ? `🏛 <b>УК:</b> <a href="${ukWebsite}">${data.uk}</a>\n` : `🏛 <b>УК:</b> ${data.uk}\n`;
-        }
-        if (data.status && data.status !== 'Не указано') reply += `✅ <b>Состояние:</b> ${data.status}\n`;
-        if (data.type && data.type !== 'Не указан') reply += `🏢 <b>Тип:</b> ${data.type}\n`;
-
-        reply += `\n💰 <b>Базовые тарифы (г. Курган):</b>\n`;
-        for (const [service, info] of Object.entries(defaultTariffs)) {
-            reply += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
-        }
-
-        reply += `\n📄 <b>Полезные ресурсы:</b> <a href="https://dom.gosuslugi.ru/">ГИС ЖКХ</a>\n`;
-        reply += `\n<i>💡 Примечание: Тариф на "Содержание и ремонт жилья" устанавливается вашей УК индивидуально.</i>`;
-
-        await sendText(userId, reply);
-        await sendText(userId, `✅ <b>Готово!</b>\n\nХотите проверить другой адрес? Просто введите его ниже.`);
+        return;
     }
+
+    // Найдено: exact или fuzzy (автокоррекция улицы)
+    const data = result.data;
+    const mapUrl = get2GisUrl(data.address);
+    const ukWebsite = getUkWebsite(data.uk);
+
+    let reply = `🏠 <b>Справка о доме</b>\n\n`;
+    if (result.kind === "fuzzy") reply += `🔁 <b>Возможно, вы имели в виду:</b> ${data.address}\n\n`;
+    reply += `📍 <b>Адрес:</b> <a href="${mapUrl}">${data.address}</a>\n`;
+    if (data.uk && data.uk !== 'Не указана') {
+        reply += ukWebsite ? `🏛 <b>УК:</b> <a href="${ukWebsite}">${data.uk}</a>\n` : `🏛 <b>УК:</b> ${data.uk}\n`;
+    }
+    if (data.status && data.status !== 'Не указано') reply += `✅ <b>Состояние:</b> ${data.status}\n`;
+    if (data.type && data.type !== 'Не указан') reply += `🏢 <b>Тип:</b> ${data.type}\n`;
+
+    reply += `\n💰 <b>Базовые тарифы (г. Курган):</b>\n`;
+    for (const [service, info] of Object.entries(defaultTariffs)) {
+        reply += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
+    }
+
+    reply += `\n📄 <b>Полезные ресурсы:</b> <a href="https://dom.gosuslugi.ru/">ГИС ЖКХ</a>\n`;
+    reply += `\n<i>💡 Примечание: Тариф на "Содержание и ремонт жилья" устанавливается вашей УК индивидуально.</i>`;
+
+    await sendText(userId, reply);
+    await sendText(userId, `✅ <b>Готово!</b>\n\nХотите проверить другой адрес? Просто введите его ниже.`);
 }
 
 // глав цикл
@@ -267,11 +412,25 @@ async function mainLoop() {
     }
 }
 
-(async () => {
-    const bot = await getBotInfo();
-    if (!bot) { console.log("⛔ Стоп."); return; }
-    mainLoop();
-})();
+module.exports = {
+    parseAddress,
+    findHouseInDb,
+    searchHouse,
+    searchStreets,
+    findHouseViaFuzzy,
+    suggestAddresses,
+    normalizeFuzzy,
+    capName,
+    formatAddress
+};
+
+if (require.main === module) {
+    (async () => {
+        const bot = await getBotInfo();
+        if (!bot) { console.log("⛔ Стоп."); return; }
+        mainLoop();
+    })();
+}
 
 process.on('unhandledRejection', r => { console.error("\n❌", r); process.stdin.resume(); });
 process.on('uncaughtException', e => { console.error("\n❌", e); process.stdin.resume(); });
