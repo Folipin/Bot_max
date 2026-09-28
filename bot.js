@@ -4,16 +4,15 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const Fuse = require("fuse.js");
 
-// Наст
-const TOKEN = "твой токен";
 
+const TOKEN = 'токен'
 const BASE_URL = "https://platform-api2.max.ru";
 
 const db = new Database(path.join(__dirname, 'houses.db'), { readonly: true });
 let marker = null;
 const userStates = new Map();
 
-//  Тариф 
+
 const defaultTariffs = {
     "Холодное водоснабжение": { price: "49,06", unit: "руб/м³" },
     "Горячее водоснабжение": { price: "2 957,41", unit: "руб/Гкал" },
@@ -24,16 +23,22 @@ const defaultTariffs = {
     "Газоснабжение (среднее)": { price: "5,68", unit: "руб/м³" }
 };
 
-// Сайты
+
+const mainTariffs = {
+    "Холодное водоснабжение": defaultTariffs["Холодное водоснабжение"],
+    "Отопление": defaultTariffs["Отопление"],
+    "Электроснабжение": defaultTariffs["Электроснабжение"]
+};
+
+
 const ukWebsites = [
     ["актив", "https://xn--80aerhsaa8a.xn--p1ai/"],
     ["атлант", "https://225006.ru/"],
     ["байкал", "https://baykal-upravlyayuschaya.orgs.biz/"],
     ["веста", "http://uk-westa.ru/"],
     ["возрождение", "http://kurgan.holme.ru/uk/5a31591fc7d6045057a8da4d/"],
-    ["восток центр", "https://vostok-tsentr-ooo.orgs.biz/"],
     ["восток-центр", "https://vostok-tsentr-ooo.orgs.biz/"],
-    ["ваш дом", "https://mingkh.ru/kurganskaya-oblast/kurgan/1234500002065/"],
+    ["ваш дом", "https://gogov.ru/zkh/krg/z525656"],
     ["гарант", "https://ukgarant.ucoz.com/"],
     ["геометрия", "https://xn--45-glcias0aput9l.xn--p1ai/"],
     ["горкомжилстрой", "https://gorkomzhilstroy-upravlyayuschaya.orgs.biz/"],
@@ -48,15 +53,14 @@ const ukWebsites = [
     ["курган плюс", "https://mingkh.ru/kurganskaya-oblast/kurgan/1134501004550/"],
     ["курганская управляющая компания", "https://mingkh.ru/kurganskaya-oblast/kurgan/1134501004550/"],
     ["компаньон", "https://mingkh.ru/kurganskaya-oblast/kurgan/1084501010110/"],
-    ["комплектмашсепвис", "https://mingkh.ru/kurganskaya-oblast/kurgan/1084501010110/"],
+    ["комплектмашсепвис", null],
     ["мастер", "https://mingkh.ru/kurganskaya-oblast/kurgan/1104501000900/"],
-    ["многофункциональная коммунальная деятельность", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501004620/"],
+    ["мкд", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501004620/"],
     ["наш город", "https://mingkh.ru/kurganskaya-oblast/kurgan/1154501006670/"],
-    ["новая волна", "https://zhkh.su/upravljajushhie_kompanii_tszh_i_zhsk_rossii/ooo_novaja_volna_kurgan_7595519/"],
+    ["новая волна курган", "https://www.домавгороде.рф/"],
     ["новый квартал", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501001640/"],
-    ["олимп", "https://xn--45-vlclgjk.xn--p1ai/"],
+    ["олимп", "https://ukolimp45.ru/"],
     ["партнёр", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501003993/"],
-    ["партнер", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501003993/"],
     ["перспектива", "https://mingkh.ru/kurganskaya-oblast/kurgan/1154501004437/"],
     ["порядок", "https://mingkh.ru/kurganskaya-oblast/kurgan/1204500001310/"],
     ["престиж", "https://укпрестиж.рф/"],
@@ -64,7 +68,7 @@ const ukWebsites = [
     ["реал", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501004675/"],
     ["сервис", "https://mingkh.ru/kurganskaya-oblast/kurgan/1094501008634/"],
     ["согласие", "https://mingkh.ru/kurganskaya-oblast/kurgan/1094501008029/"],
-    ["солнечный дворик", "https://mingkh.ru/kurganskaya-oblast/kurgan/1144501004405/"],
+    ["солнечный дворик", "https://my-gkh.ru/getorganization/ooo-uk-solnechny-dvorik"],
     ["соцгарантия", "https://mingkh.ru/kurganskaya-oblast/kurgan/1064501173978/"],
     ["стандарт", null],
     ["старт", "https://mingkh.ru/kurganskaya-oblast/kurgan/1184501001717/"],
@@ -72,7 +76,7 @@ const ukWebsites = [
     ["тандем", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501002684/"],
     ["уют", "https://mingkh.ru/kurganskaya-oblast/kurgan/1094501002969/"],
     ["феникс", "https://mingkh.ru/kurganskaya-oblast/kurgan/1164501058809/"],
-    ["фортуна", "https://www.fortuna45.ru"],
+    ["фортуна", "https://mingkh.ru/kurganskaya-oblast/kurgan/1104501001549/"],
     ["чистый квартал", "https://mingkh.ru/kurganskaya-oblast/kurgan/1144501000291/"],
     ["чистый дом", "https://mingkh.ru/kurganskaya-oblast/kurgan/1174501007691/"],
     ["шестнадцатый район", "https://mingkh.ru/kurganskaya-oblast/kurgan/1194501002167/"],
@@ -97,14 +101,14 @@ function getUkWebsite(ukName) {
     return null;
 }
 
-// База чек
+
 try {
     const count = db.prepare('SELECT COUNT(*) as c FROM houses').get();
     console.log(`✅ База подключена. Домов: ${count.c}`);
     if (count.c === 0) { console.error('⚠️ БАЗА ПУСТАЯ!'); process.exit(1); }
 } catch (e) { console.error('❌ Ошибка базы:', e.message); process.exit(1); }
 
-// Апи лучшего мессенджера
+// MAX API ФУНКЦИИ 
 async function getBotInfo() {
     try {
         const r = await fetch(`${BASE_URL}/me`, { headers: { "Authorization": TOKEN } });
@@ -115,7 +119,6 @@ async function getBotInfo() {
     } catch (e) { console.error("❌ Сеть:", e.message); return null; }
 }
 
-//функция отправки текста
 async function sendText(userId, text) {
     if (!userId) return;
     try {
@@ -129,13 +132,63 @@ async function sendText(userId, text) {
     } catch (e) { console.error("❌ Сеть:", e.message); }
 }
 
+async function sendTextWithButtons(userId, text, buttons) {
+    if (!userId) return;
+    try {
+        const body = {
+            text,
+            format: "html",
+            attachments: [{
+                type: "inline_keyboard",
+                payload: { buttons }
+            }]
+        };
+        const response = await fetch(`${BASE_URL}/messages?user_id=${userId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": TOKEN },
+            body: JSON.stringify(body)
+        });
+        if (!response.ok) console.error(`❌ Отправка кнопок: ${response.status}`, await response.text());
+    } catch (e) { console.error("❌ Сеть:", e.message); }
+}
+
+async function answerCallback(callbackId) {
+    if (!callbackId) return;
+    try {
+        const response = await fetch(`${BASE_URL}/answers?callback_id=${callbackId}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "Authorization": TOKEN },
+            body: JSON.stringify({})
+        });
+        if (!response.ok) console.error(`❌ Callback: ${response.status}`, await response.text());
+    } catch (e) { console.error("❌ Сеть:", e.message); }
+}
+
+const MAIN_KEYBOARD = [
+    [
+        { type: "callback", text: "📋 Помощь", payload: "/help" },
+        { type: "callback", text: "🔄 Новый поиск", payload: "/start" }
+    ]
+];
+
+const HELP_KEYBOARD = [
+    [
+        { type: "callback", text: "🏠 Начать поиск", payload: "/start" }
+    ]
+];
+
+
+const FULL_TARIFFS_KEYBOARD = [
+    [{ type: "callback", text: "🔙 Назад к справке", payload: "/back_to_house" }]
+];
+
 async function getUpdates() {
     let url = `${BASE_URL}/updates?timeout=30&limit=100`;
     if (marker !== null) url += `&marker=${marker}`;
     return (await fetch(url, { headers: { "Authorization": TOKEN } })).json();
 }
 
-// Логик
+
 function parseAddress(input) {
     let clean = input.replace(/(?:г\.?\s*Курган|Курганская\s+обл\.?)[,\s]*/gi, '')
         .replace(/\b(?:ул\.?|улица|пр-кт\.?|проспект|мкр\.?|микрорайон|б-р\.?|бульвар|пер\.?|переулок|дом|д\.?)\s*/gi, '')
@@ -152,10 +205,9 @@ function get2GisUrl(address) {
     return `https://2gis.ru/kurgan/search/${encodeURIComponent(address)}`;
 }
 
-// ================= Нечёткий поиск (fuse.js) =================
-const AUTO_THRESHOLD = 0.35;    // при таком качестве совпадения улицы — сразу показываем карточку
-const SUGGEST_THRESHOLD = 0.6;  // при таком качестве — предлагаем список похожих адресов
-const MIN_MATCH = 3;            // минимальная длина совпадающего фрагмента запроса
+const AUTO_THRESHOLD = 0.35;
+const SUGGEST_THRESHOLD = 0.6;
+const MIN_MATCH = 3;
 
 function normalizeFuzzy(s) {
     return String(s).toLowerCase().replace(/ё/g, 'е');
@@ -179,7 +231,7 @@ function buildFuzzyIndex() {
         streets.map(s => ({ street: s.street, street_type: s.street_type, norm: normalizeFuzzy(s.street) })),
         {
             keys: ["norm"],
-            threshold: 1,              // фильтруем сами по score (чем меньше — тем точнее)
+            threshold: 1,
             ignoreLocation: true,
             minMatchCharLength: MIN_MATCH,
             includeScore: true,
@@ -193,7 +245,6 @@ function buildFuzzyIndex() {
     console.log(`🔎 Нечёткий поиск: ${streets.length} улиц, справочник домов готов`);
 }
 
-// Похожие улицы (от лучшего к худшему), отфильтрованные по порогу score
 function searchStreets(street, limit, threshold) {
     const q = normalizeFuzzy(street);
     if (!q) return [];
@@ -220,7 +271,6 @@ function closestHouse(list, target) {
     return best;
 }
 
-// Опечатка в улице + точный номер дома → дом на этом же месте находится сразу
 function findHouseViaFuzzy(street, house) {
     for (const cand of searchStreets(street, 3, AUTO_THRESHOLD)) {
         const data = findHouseInDb(cand.street, house);
@@ -229,7 +279,6 @@ function findHouseViaFuzzy(street, house) {
     return null;
 }
 
-// Список похожих существующих адресов (улица + ближайший реальный дом)
 function suggestAddresses(street, house) {
     const out = [];
     for (const cand of searchStreets(street, 3, SUGGEST_THRESHOLD)) {
@@ -239,7 +288,6 @@ function suggestAddresses(street, house) {
     return out;
 }
 
-// Оркестратор поиска: точный → нечёткий → подсказки
 function searchHouse(street, house) {
     const exact = findHouseInDb(street, house);
     if (exact) return { kind: "exact", data: exact };
@@ -253,13 +301,74 @@ function searchHouse(street, house) {
         return { kind: "notfound" };
     }
 
-    // улица без номера дома
     const streets = searchStreets(street, 5, SUGGEST_THRESHOLD);
     if (streets.length) return { kind: "street-suggest", streets };
     return { kind: "garbage" };
 }
 
+
+function generateCapRepairData(address, houseNumber) {
+    const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    const baseYear = 2028 + (hash % 3);
+
+ 
+    const summaryWorks = [
+        "Ремонт крыши и фасада",
+        "Ремонт внутридомовых инженерных систем",
+        "Разработка проектной документации"
+    ];
+
+    return { year: baseYear, works: summaryWorks };
+}
+
+function formatCapRepairTable(repairData) {
+    let table = `📅 <b>Планируемый капитальный ремонт:</b>\n\n`;
+    table += `🔹 <b>Ближайший этап:</b> ${repairData.year} г.\n`;
+    table += ` <b>Основные виды работ:</b>\n`;
+    for (const work of repairData.works) {
+        table += `  • ${work}\n`;
+    }
+    table += `  • и другие работы согласно региональной программе.\n\n`;
+
+    table += `<i>⚠️ Данные носят демонстрационный характер.</i>\n`;
+    table += `<i>🔗 <a href="https://www.fkr45.ru/capital_repair_program/default.aspx#tab1">Полный график и детали уточняйте на сайте</a></i>`;
+
+    return table;
+}
+
 buildFuzzyIndex();
+
+async function sendHouseInfo(userId, data, kind = "exact") {
+    const mapUrl = get2GisUrl(data.address);
+    const ukWebsite = getUkWebsite(data.uk);
+
+    let reply = `🏠 <b>Справка о доме</b>\n\n`;
+    if (kind === "fuzzy") reply += `🔁 <b>Возможно, вы имели в виду:</b> ${data.address}\n\n`;
+    reply += `📍 <b>Адрес:</b> <a href="${mapUrl}">${data.address}</a>\n`;
+    if (data.uk && data.uk !== 'Не указана') {
+        reply += ukWebsite ? `🏛 <b>УК:</b> <a href="${ukWebsite}">${data.uk}</a>\n` : `🏛 <b>УК:</b> ${data.uk}\n`;
+    }
+    if (data.status && data.status !== 'Не указано') reply += `✅ <b>Состояние:</b> ${data.status}\n`;
+    if (data.type && data.type !== 'Не указан') reply += `🏢 <b>Тип:</b> ${data.type}\n`;
+
+
+    reply += `\n💰 <b>Основные тарифы (г. Курган):</b>\n`;
+    for (const [service, info] of Object.entries(mainTariffs)) {
+        reply += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
+    }
+    reply += `\n📊 <a href="https://my-gkh.ru/getcitytariff/kurgan">Полные тарифы на сайте РЭК</a>`;
+
+    reply += `\n\n📄 <b><a href="https://dom.gosuslugi.ru/">Уточнить информацию</a></b>\n`;
+
+    const capRepairData = generateCapRepairData(data.address, 1);
+    reply += `\n${formatCapRepairTable(capRepairData)}`;
+
+    reply += `\n\n<i>💡 Примечание: Тариф на "Содержание и ремонт жилья" устанавливается вашей УК индивидуально.</i>`;
+
+    await sendTextWithButtons(userId, reply, MAIN_KEYBOARD);
+    await sendText(userId, `✅ <b>Готово!</b>\n\nХотите проверить другой адрес? Просто введите его ниже.`);
+}
+
 
 async function handleMessage(update) {
     if (update.update_type !== "message_created") return;
@@ -274,44 +383,63 @@ async function handleMessage(update) {
     console.log(`📩 ${firstName}: "${text}"`);
     const currentState = userStates.get(userId);
 
-    // 1. Команда активации
     if (text === "/start") {
         userStates.set(userId, "ACTIVE");
-        await sendText(userId,
+        await sendTextWithButtons(userId,
             `Привет, ${firstName}! 👋\n\n` +
             `Я бот для получения справки по домам города <b>Курган</b>.\n\n` +
-            `<b>📋 Доступные команды:</b>\n` +
-            `• <b>/start</b>\n` +
-            `• <b>/help</b>\n\n` +
             `✅ <b>Режим поиска активирован!</b>\n` +
-            `Теперь просто введите адрес дома (например: <i>Машиностроителей 19</i> или <i>Кирова 117</i>).`
+            `Теперь просто введите адрес дома (например: <i>Машиностроителей 19</i> или <i>Кирова 117</i>).\n\n` +
+            `<i>Используйте кнопки ниже для навигации.</i>`,
+            MAIN_KEYBOARD
         );
         return;
     }
 
-    // 2. Команда помощи
     if (text === "/help") {
-        await sendText(userId,
-            `<b>📋 Справка по командам:</b>\n\n` +
-            `• <b>/start</b> — активировать режим поиска\n` +
-            `• <b>/help</b> — показать эту подсказку\n\n` +
-            `После активации вы можете вводить адреса один за другим без повторной команды /start.\n\n` +
+        await sendTextWithButtons(userId,
+            `<b>📋 Справка:</b>\n\n` +
+            `Этот бот помогает быстро получить информацию о многоквартирных домах в Кургане.\n\n` +
             `🔎 <b>Поиск терпим к опечаткам:</b>\n` +
-            `Если дом не найден точно, бот предложит похожие адреса (например: <i>«Корева 117»</i> → <i>«Кирова 117»</i>).`
+            `Если дом не найден точно, бот предложит похожие адреса (например: <i>«Корева 117»</i> → <i>«Кирова 117»</i>).\n\n` +
+            `Просто введите адрес, и бот покажет тарифы, управляющую компанию и другую полезную информацию.`,
+            HELP_KEYBOARD
         );
         return;
     }
 
-    // 3. Блокировка, если поиск не активирован
+    // 🔧 ВАРИАНТ Б: Показать все тарифы
+    if (text === "/all_tariffs") {
+        let msg = `💰 <b>Все тарифы ЖКХ (г. Курган):</b>\n\n`;
+        for (const [service, info] of Object.entries(defaultTariffs)) {
+            msg += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
+        }
+        msg += `\n📊 <b>Полная информация:</b> <a href="https://rek45.ru/">РЭК Курганской области</a>`;
+        await sendTextWithButtons(userId, msg, FULL_TARIFFS_KEYBOARD);
+        return;
+    }
+
+    // 🔧 ВАРИАНТ Б: Вернуться к справке о доме
+    if (text === "/back_to_house") {
+        const lastHouse = userStates.get(userId)?.lastHouse;
+        const lastKind = userStates.get(userId)?.lastKind || "exact";
+        if (lastHouse) {
+            await sendHouseInfo(userId, lastHouse, lastKind);
+        } else {
+            await sendText(userId, "❌ Информация о доме не найдена. Введите адрес заново.");
+        }
+        return;
+    }
+
     if (currentState !== "ACTIVE") {
-        await sendText(userId,
+        await sendTextWithButtons(userId,
             `⚠️ <b>Поиск недоступен</b>\n\n` +
-            `Чтобы получить справку о доме, сначала введите команду <b>/start</b>.`
+            `Чтобы получить справку о доме, сначала нажмите кнопку <b>🔄 Новый поиск</b>.`,
+            [[{ type: "callback", text: "🏠 Начать", payload: "/start" }]]
         );
         return;
     }
 
-    // 4. Обработка адреса
     const { street, house } = parseAddress(text);
     console.log(`🔍 Парсинг: улица="${street}", дом="${house}"`);
 
@@ -329,7 +457,6 @@ async function handleMessage(update) {
     await sendText(userId, "⏳ Ищу информацию...");
     const result = searchHouse(street, house);
 
-    // Не найдено, но есть списки похожих адресов
     if (result.kind === "suggest") {
         let msg = `❌ <b>Дом не найден</b>\n\n` +
             `Ваш запрос: <i>${text}</i>\n\n` +
@@ -339,11 +466,10 @@ async function handleMessage(update) {
         }
         const first = result.suggestions[0];
         msg += `\n💡 Введите полный адрес из списка, например: <i>${formatAddress(first.street, first.street_type, first.house)}</i>`;
-        await sendText(userId, msg);
+        await sendTextWithButtons(userId, msg, MAIN_KEYBOARD);
         return;
     }
 
-    // Улица без номера дома — есть похожие улицы
     if (result.kind === "street-suggest") {
         let msg = `❌ <b>Не удалось распознать номер дома</b>\n\n` +
             `Вы ввели: <i>${text}</i>\n\n` +
@@ -353,47 +479,66 @@ async function handleMessage(update) {
         }
         const first = result.streets[0];
         msg += `\n💡 Введите улицу и номер дома, например: <i>${capName(first.street)} 1</i>`;
-        await sendText(userId, msg);
+        await sendTextWithButtons(userId, msg, MAIN_KEYBOARD);
         return;
     }
 
-    // Совсем ничего похожего
     if (result.kind === "garbage" || result.kind === "notfound") {
-        await sendText(userId,
+        await sendTextWithButtons(userId,
             `❌ <b>Дом не найден</b>\n\n` +
             `Ваш запрос: <i>${text}</i>\n\n` +
-            `💡 Попробуйте написать проще, например: <i>Кирова 117</i>`
+            `💡 Попробуйте написать проще, например: <i>Кирова 117</i>`,
+            MAIN_KEYBOARD
         );
         return;
     }
 
-    // Найдено: exact или fuzzy (автокоррекция улицы)
-    const data = result.data;
-    const mapUrl = get2GisUrl(data.address);
-    const ukWebsite = getUkWebsite(data.uk);
+    // 🔧 ВАРИАНТ Б: Сохраняем данные о доме для кнопки "Назад"
+    userStates.set(userId, { ...currentState, lastHouse: result.data, lastKind: result.kind });
 
-    let reply = `🏠 <b>Справка о доме</b>\n\n`;
-    if (result.kind === "fuzzy") reply += `🔁 <b>Возможно, вы имели в виду:</b> ${data.address}\n\n`;
-    reply += `📍 <b>Адрес:</b> <a href="${mapUrl}">${data.address}</a>\n`;
-    if (data.uk && data.uk !== 'Не указана') {
-        reply += ukWebsite ? `🏛 <b>УК:</b> <a href="${ukWebsite}">${data.uk}</a>\n` : `🏛 <b>УК:</b> ${data.uk}\n`;
-    }
-    if (data.status && data.status !== 'Не указано') reply += `✅ <b>Состояние:</b> ${data.status}\n`;
-    if (data.type && data.type !== 'Не указан') reply += `🏢 <b>Тип:</b> ${data.type}\n`;
-
-    reply += `\n💰 <b>Базовые тарифы (г. Курган):</b>\n`;
-    for (const [service, info] of Object.entries(defaultTariffs)) {
-        reply += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
-    }
-
-    reply += `\n📄 <b>Полезные ресурсы:</b> <a href="https://dom.gosuslugi.ru/">ГИС ЖКХ</a>\n`;
-    reply += `\n<i>💡 Примечание: Тариф на "Содержание и ремонт жилья" устанавливается вашей УК индивидуально.</i>`;
-
-    await sendText(userId, reply);
-    await sendText(userId, `✅ <b>Готово!</b>\n\nХотите проверить другой адрес? Просто введите его ниже.`);
+    await sendHouseInfo(userId, result.data, result.kind);
 }
 
-// глав цикл
+async function handleBotStarted(update) {
+    const userId = update.user?.user_id;
+    const firstName = update.user?.first_name || "Пользователь";
+
+    console.log(`🚀 bot_started от ${firstName} (id=${userId})`);
+    if (!userId) return;
+
+    userStates.set(userId, "ACTIVE");
+
+    await sendTextWithButtons(userId,
+        `Привет, ${firstName}! 👋\n\n` +
+        `Я бот для получения справки по домам города <b>Курган</b>.\n\n` +
+        `✅ <b>Режим поиска активирован!</b>\n` +
+        `Теперь просто введите адрес дома (например: <i>Машиностроителей 19</i> или <i>Кирова 117</i>).\n\n` +
+        `<i>Используйте кнопки ниже для навигации.</i>`,
+        MAIN_KEYBOARD
+    );
+}
+
+async function handleCallback(update) {
+    const callbackId = update.callback?.callback_id;
+    const payload = update.callback?.payload;
+    const userId = update.callback?.user?.user_id || update.user?.user_id;
+
+    console.log(`🖱️ Callback: payload="${payload}", user=${userId}`);
+
+    await answerCallback(callbackId);
+    if (!payload || !userId) return;
+
+    await handleMessage({
+        update_type: "message_created",
+        chat_id: userId,
+        message: {
+            body: { text: payload },
+            sender: { user_id: userId, first_name: "Пользователь" }
+        }
+    });
+}
+
+// ==================== ГЛАВНЫЙ ЦИКЛ ====================
 async function mainLoop() {
     console.log("🤖 Бот запущен...");
     while (true) {
@@ -401,10 +546,16 @@ async function mainLoop() {
             const data = await getUpdates();
             if (data.updates?.length) {
                 for (const u of data.updates) {
-                    if (u.message?.body?.text) await handleMessage(u);
+                    if (u.update_type === "message_created" && u.message?.body?.text) {
+                        await handleMessage(u);
+                    } else if (u.update_type === "message_callback") {
+                        await handleCallback(u);
+                    } else if (u.update_type === "bot_started") {
+                        await handleBotStarted(u);
+                    }
                 }
-                if (data.marker !== undefined) marker = data.marker;
             }
+            if (data.marker !== undefined) marker = data.marker;
         } catch (e) {
             console.error("Ошибка сети:", e.message);
             await new Promise(r => setTimeout(r, 5000));
