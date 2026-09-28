@@ -4,15 +4,15 @@ const path = require("path");
 const Database = require("better-sqlite3");
 const Fuse = require("fuse.js");
 
-
-const TOKEN = 'токен'
+// ==================== НАСТРОЙКИ ====================
+const TOKEN = 'токен'; // ⚠️ ВСТАВЬТЕ СЮДА ВАШ РЕАЛЬНЫЙ ТОКЕН
 const BASE_URL = "https://platform-api2.max.ru";
 
 const db = new Database(path.join(__dirname, 'houses.db'), { readonly: true });
 let marker = null;
 const userStates = new Map();
 
-
+// ==================== ТАРИФЫ ДЛЯ КУРГАНА ====================
 const defaultTariffs = {
     "Холодное водоснабжение": { price: "49,06", unit: "руб/м³" },
     "Горячее водоснабжение": { price: "2 957,41", unit: "руб/Гкал" },
@@ -23,14 +23,13 @@ const defaultTariffs = {
     "Газоснабжение (среднее)": { price: "5,68", unit: "руб/м³" }
 };
 
-
 const mainTariffs = {
     "Холодное водоснабжение": defaultTariffs["Холодное водоснабжение"],
     "Отопление": defaultTariffs["Отопление"],
     "Электроснабжение": defaultTariffs["Электроснабжение"]
 };
 
-
+// ==================== САЙТЫ УК (из вашего CSV) ====================
 const ukWebsites = [
     ["актив", "https://xn--80aerhsaa8a.xn--p1ai/"],
     ["атлант", "https://225006.ru/"],
@@ -101,14 +100,14 @@ function getUkWebsite(ukName) {
     return null;
 }
 
-
+// ==================== ПРОВЕРКА БАЗЫ ====================
 try {
     const count = db.prepare('SELECT COUNT(*) as c FROM houses').get();
     console.log(`✅ База подключена. Домов: ${count.c}`);
     if (count.c === 0) { console.error('⚠️ БАЗА ПУСТАЯ!'); process.exit(1); }
 } catch (e) { console.error('❌ Ошибка базы:', e.message); process.exit(1); }
 
-// MAX API ФУНКЦИИ 
+// ==================== MAX API ФУНКЦИИ ====================
 async function getBotInfo() {
     try {
         const r = await fetch(`${BASE_URL}/me`, { headers: { "Authorization": TOKEN } });
@@ -164,10 +163,14 @@ async function answerCallback(callbackId) {
     } catch (e) { console.error("❌ Сеть:", e.message); }
 }
 
+// ==================== КЛАВИАТУРЫ ====================
 const MAIN_KEYBOARD = [
     [
         { type: "callback", text: "📋 Помощь", payload: "/help" },
         { type: "callback", text: "🔄 Новый поиск", payload: "/start" }
+    ],
+    [
+        { type: "callback", text: "💰 Все тарифы", payload: "/all_tariffs" }
     ]
 ];
 
@@ -176,7 +179,6 @@ const HELP_KEYBOARD = [
         { type: "callback", text: "🏠 Начать поиск", payload: "/start" }
     ]
 ];
-
 
 const FULL_TARIFFS_KEYBOARD = [
     [{ type: "callback", text: "🔙 Назад к справке", payload: "/back_to_house" }]
@@ -188,7 +190,7 @@ async function getUpdates() {
     return (await fetch(url, { headers: { "Authorization": TOKEN } })).json();
 }
 
-
+// ==================== ЛОГИКА ПОИСКА ====================
 function parseAddress(input) {
     let clean = input.replace(/(?:г\.?\s*Курган|Курганская\s+обл\.?)[,\s]*/gi, '')
         .replace(/\b(?:ул\.?|улица|пр-кт\.?|проспект|мкр\.?|микрорайон|б-р\.?|бульвар|пер\.?|переулок|дом|д\.?)\s*/gi, '')
@@ -306,12 +308,11 @@ function searchHouse(street, house) {
     return { kind: "garbage" };
 }
 
-
+// ==================== ДАННЫЕ О КАПРЕМОНТЕ ====================
 function generateCapRepairData(address, houseNumber) {
     const hash = address.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
     const baseYear = 2028 + (hash % 3);
 
- 
     const summaryWorks = [
         "Ремонт крыши и фасада",
         "Ремонт внутридомовых инженерных систем",
@@ -324,7 +325,7 @@ function generateCapRepairData(address, houseNumber) {
 function formatCapRepairTable(repairData) {
     let table = `📅 <b>Планируемый капитальный ремонт:</b>\n\n`;
     table += `🔹 <b>Ближайший этап:</b> ${repairData.year} г.\n`;
-    table += ` <b>Основные виды работ:</b>\n`;
+    table += `🔹 <b>Основные виды работ:</b>\n`;
     for (const work of repairData.works) {
         table += `  • ${work}\n`;
     }
@@ -338,6 +339,7 @@ function formatCapRepairTable(repairData) {
 
 buildFuzzyIndex();
 
+// ==================== ОТПРАВКА ИНФОРМАЦИИ О ДОМЕ ====================
 async function sendHouseInfo(userId, data, kind = "exact") {
     const mapUrl = get2GisUrl(data.address);
     const ukWebsite = getUkWebsite(data.uk);
@@ -350,7 +352,6 @@ async function sendHouseInfo(userId, data, kind = "exact") {
     }
     if (data.status && data.status !== 'Не указано') reply += `✅ <b>Состояние:</b> ${data.status}\n`;
     if (data.type && data.type !== 'Не указан') reply += `🏢 <b>Тип:</b> ${data.type}\n`;
-
 
     reply += `\n💰 <b>Основные тарифы (г. Курган):</b>\n`;
     for (const [service, info] of Object.entries(mainTariffs)) {
@@ -369,7 +370,7 @@ async function sendHouseInfo(userId, data, kind = "exact") {
     await sendText(userId, `✅ <b>Готово!</b>\n\nХотите проверить другой адрес? Просто введите его ниже.`);
 }
 
-
+// ==================== ОБРАБОТКА СООБЩЕНИЙ ====================
 async function handleMessage(update) {
     if (update.update_type !== "message_created") return;
 
@@ -408,18 +409,16 @@ async function handleMessage(update) {
         return;
     }
 
-    // 🔧 ВАРИАНТ Б: Показать все тарифы
     if (text === "/all_tariffs") {
         let msg = `💰 <b>Все тарифы ЖКХ (г. Курган):</b>\n\n`;
         for (const [service, info] of Object.entries(defaultTariffs)) {
             msg += `• ${service}: <b>${info.price}</b> ${info.unit}\n`;
         }
-        msg += `\n📊 <b>Полная информация:</b> <a href="https://rek45.ru/">РЭК Курганской области</a>`;
+        msg += `\n📊 <b>Полная информация:</b> <a href="https://my-gkh.ru/getcitytariff/kurgan">РЭК Курганской области</a>`;
         await sendTextWithButtons(userId, msg, FULL_TARIFFS_KEYBOARD);
         return;
     }
 
-    // 🔧 ВАРИАНТ Б: Вернуться к справке о доме
     if (text === "/back_to_house") {
         const lastHouse = userStates.get(userId)?.lastHouse;
         const lastKind = userStates.get(userId)?.lastKind || "exact";
@@ -493,12 +492,11 @@ async function handleMessage(update) {
         return;
     }
 
-    // 🔧 ВАРИАНТ Б: Сохраняем данные о доме для кнопки "Назад"
     userStates.set(userId, { ...currentState, lastHouse: result.data, lastKind: result.kind });
-
     await sendHouseInfo(userId, result.data, result.kind);
 }
 
+// ==================== СИСТЕМНЫЙ ЗАПУСК ====================
 async function handleBotStarted(update) {
     const userId = update.user?.user_id;
     const firstName = update.user?.first_name || "Пользователь";
@@ -518,12 +516,16 @@ async function handleBotStarted(update) {
     );
 }
 
+// ==================== ОБРАБОТКА НАЖАТИЙ НА КНОПКИ ====================
 async function handleCallback(update) {
     const callbackId = update.callback?.callback_id;
     const payload = update.callback?.payload;
     const userId = update.callback?.user?.user_id || update.user?.user_id;
 
-    console.log(`🖱️ Callback: payload="${payload}", user=${userId}`);
+    // 🔧 ИСПРАВЛЕНИЕ БАГА: Берем реальное имя из объекта callback, а не хардкодим "Пользователь"
+    const firstName = update.callback?.user?.first_name || "Пользователь";
+
+    console.log(`🖱️ Callback: payload="${payload}", user=${userId}, name=${firstName}`);
 
     await answerCallback(callbackId);
     if (!payload || !userId) return;
@@ -533,7 +535,7 @@ async function handleCallback(update) {
         chat_id: userId,
         message: {
             body: { text: payload },
-            sender: { user_id: userId, first_name: "Пользователь" }
+            sender: { user_id: userId, first_name: firstName } // Передаем настоящее имя!
         }
     });
 }
